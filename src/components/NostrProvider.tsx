@@ -9,11 +9,14 @@ import {
   type ReactNode,
 } from "react";
 import {
+  disconnectSigner,
   getPublicKey,
   isNostrAvailable,
+  restoreRemoteSigner,
 } from "@/lib/nostr/signer";
 import { getProfile } from "@/lib/nostr/profiles";
 import type { NostrProfile } from "@/types/nostr";
+import { ConnectModal } from "@/components/ConnectModal";
 
 interface NostrContextValue {
   pubkey: string | null;
@@ -30,12 +33,18 @@ const NostrContext = createContext<NostrContextValue | null>(null);
 export function NostrProvider({ children }: { children: ReactNode }) {
   const [pubkey, setPubkey] = useState<string | null>(null);
   const [profile, setProfile] = useState<NostrProfile | null>(null);
-  const [isAvailable, setIsAvailable] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
-    setIsAvailable(isNostrAvailable());
-    // Try restore from session
+    // 1. Restore a NIP-46 (remote signer) session
+    const remotePk = restoreRemoteSigner();
+    if (remotePk) {
+      setPubkey(remotePk);
+      getProfile(remotePk).then(setProfile).catch(() => {});
+      return;
+    }
+    // 2. Restore a NIP-07 (extension) session
     const stored = sessionStorage.getItem("unkeyed-pubkey");
     if (stored && isNostrAvailable()) {
       setPubkey(stored);
@@ -43,21 +52,29 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const finishConnect = useCallback(async (pk: string) => {
+    setPubkey(pk);
+    setModalOpen(false);
+    try {
+      setProfile(await getProfile(pk));
+    } catch {
+      /* profile is optional */
+    }
+  }, []);
+
   const connect = useCallback(async () => {
+    // No extension (e.g. mobile browsers): offer signer app / bunker link.
     if (!isNostrAvailable()) {
-      alert(
-        "No Nostr signer detected.\n\nInstall a NIP-07 browser extension such as Alby, nos2x, or Flamingo to connect."
-      );
+      setModalOpen(true);
       return;
     }
     setIsConnecting(true);
     try {
+      await disconnectSigner(); // make sure the extension is the active signer
       const pk = await getPublicKey();
       if (pk) {
-        setPubkey(pk);
         sessionStorage.setItem("unkeyed-pubkey", pk);
-        const p = await getProfile(pk);
-        setProfile(p);
+        await finishConnect(pk);
       }
     } catch (err) {
       console.error(err);
@@ -65,12 +82,21 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsConnecting(false);
     }
-  }, []);
+  }, [finishConnect]);
+
+  const handleRemoteConnected = useCallback(
+    (pk: string) => {
+      sessionStorage.removeItem("unkeyed-pubkey");
+      void finishConnect(pk);
+    },
+    [finishConnect]
+  );
 
   const disconnect = useCallback(() => {
     setPubkey(null);
     setProfile(null);
     sessionStorage.removeItem("unkeyed-pubkey");
+    void disconnectSigner();
   }, []);
 
   const refreshProfile = useCallback(async () => {
@@ -84,7 +110,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       value={{
         pubkey,
         profile,
-        isAvailable,
+        isAvailable: true, // extension OR signer app / bunker link
         isConnecting,
         connect,
         disconnect,
@@ -92,6 +118,12 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+      {modalOpen && (
+        <ConnectModal
+          onClose={() => setModalOpen(false)}
+          onConnected={handleRemoteConnected}
+        />
+      )}
     </NostrContext.Provider>
   );
 }
