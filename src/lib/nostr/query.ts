@@ -15,12 +15,13 @@ export async function queryEvents(
   const seen = new Map<string, Event>();
 
   try {
-    const events = await Promise.race([
-      pool.querySync(relays, filters),
-      new Promise<Event[]>((resolve) =>
+    const results = await Promise.race([
+      Promise.all(filters.map((f) => pool.querySync(relays, f))),
+      new Promise<Event[][]>((resolve) =>
         setTimeout(() => resolve([]), timeoutMs)
       ),
     ]);
+    const events = results.flat();
 
     for (const ev of events) {
       const existing = seen.get(ev.id);
