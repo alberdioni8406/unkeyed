@@ -28,7 +28,6 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeId>("green");
-  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem("unkeyed-theme") as ThemeId | null;
@@ -38,7 +37,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } else {
       document.documentElement.setAttribute("data-theme", "green");
     }
-    setMounted(true);
   }, []);
 
   const setTheme = (t: ThemeId) => {
@@ -46,13 +44,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("unkeyed-theme", t);
     document.documentElement.setAttribute("data-theme", t);
   };
-
-  // Avoid flash
-  if (!mounted) {
-    return (
-      <div style={{ visibility: "hidden" }}>{children}</div>
-    );
-  }
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme, themes: THEMES }}>
